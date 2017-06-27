@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:title="say ip address"
+        android:id="@+id/say_ip_address_item" />
+
+    <item android:title="auto pilot"
+        android:id="@+id/auto_pilot_item" />
+
+    <item android:title="show lidar"
+        android:id="@+id/show_lidar_item" />
+
+    <item android:title="list devices"
+        android:id="@+id/show_device_list" />
+
+    <item android:title="kill"
+        android:id="@+id/kill_item" />
+
+    <item android:title="exit"
+        android:id="@+id/exit_item" />
+</menu>
