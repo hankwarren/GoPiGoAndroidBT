@@ -36,7 +36,7 @@ public class TouchPad extends View {
     public interface Listener {
         public void onUp();
         public void onDown();
-        public void onMove(double angle, boolean forward, boolean left, double dx, double dy);
+        public void onMove(double angle, double dx, double dy, double length);
     }
 
     public TouchPad(Context context, AttributeSet attributeSet) {
@@ -123,15 +123,9 @@ public class TouchPad extends View {
                 double c= angle(tmp, axis);
                 double a = Math.acos(c);
                 double deg = Math.toDegrees(a);
-                boolean forward = (deg < 90.0f);
-                boolean left = (tmp[0] < 0);
 
-                //Log.v(TAG, "ACTION_MOVE: "
-                //        + ((deg < 90.0f) ? "forward " : "backward ")
-                //        + ((tmp[0] < 0) ? "left " : "right ")
-                //        + decimalFormat.format(deg));
                 // Look at the angle to decide if go forward, backard, left or right.
-                if(listener != null) listener.onMove(deg, forward, left, tmp[0], tmp[1]);
+                if(listener != null) listener.onMove(deg, tmp[0], tmp[1], len(tmp) / radius);
                 break;
         }
         invalidate();

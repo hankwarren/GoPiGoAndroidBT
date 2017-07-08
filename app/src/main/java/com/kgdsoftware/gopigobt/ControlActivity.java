@@ -1,16 +1,13 @@
 package com.kgdsoftware.gopigobt;
 
-import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.preference.Preference;
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -25,14 +22,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.text.DecimalFormat;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-
-import static android.R.attr.data;
-import static android.R.attr.defaultValue;
-import static java.lang.reflect.Array.getInt;
 
 
 public class ControlActivity extends AppCompatActivity implements TouchPad.Listener {
@@ -48,7 +40,10 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
 
     private String pattern = "####.##";
     private DecimalFormat decimalFormat = new DecimalFormat(pattern);
-    private boolean forward;
+    private double lastAngle = 0;
+    private static final int MAX_SPEED = 250;
+
+    private int lastSpeed = 0;
     private boolean left;
     private int speed = 100;
 
@@ -190,8 +185,6 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
         }
     }
 
-
-
     private void updateSpeedLabel(int speed) {
         TextView textView = (TextView) findViewById(R.id.speedView);
         assert textView != null;
@@ -227,7 +220,6 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
             active = true;
         }
         activeView = view;
-        forward = true;
     }
 
     public void backwardClick(View view) {
@@ -239,7 +231,6 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
             active = true;
         }
         activeView = view;
-        forward = false;
     }
 
     public void stopClick(View view) {
@@ -323,54 +314,66 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
     // TouchPad listener ----------------------------------------------
 
     // It would be nice to use the length of the vector to control the speed.
-    
+
     @Override
     public void onUp() {
         Log.v(TAG, "onUp");
         sendCommand("stop");
         active = false;
-//        if (this.forward) {
-//            sendCommand("forward");
-//        } else {
-//            sendCommand("backward");
-//        }
-//        active = true;
         activeView = null;
     }
 
     @Override
     public void onDown() {
         Log.v(TAG, "onDown");
-        // need to start the thing moving
+        if (lastAngle < 90) {
+            sendCommand("forward");
+        } else {
+            sendCommand("backward");
+        }
     }
 
     @Override
-    public void onMove(double angle, boolean forward, boolean left, double dx, double dy) {
-        double length = Math.sqrt(dx * dx + dy * dy);
-        Log.v(TAG, "onMove " + decimalFormat.format(angle)
+    public void onMove(double angle, double dx, double dy, double length) {
+        boolean left = (dx < 0);
+
+        Log.v(TAG, "onMove " + decimalFormat.format(angle) + " degrees"
                 + " --> " + decimalFormat.format(length));
-        if (left != this.left) {
-            if (left) {
-                sendCommand("left");
-            } else {
-                sendCommand("right");
-            }
-            this.left = left;
-            active = true;
+        if (length > 1.0) length = 1.0;
+        if (length < 0.35) length = 0.35;
+
+        int speed = (int)(length * MAX_SPEED);
+        if (Math.abs(speed - lastSpeed) > 5) {
+            sendCommand("speed " + speed);
+            updateSpeedLabel((int)speed);
         }
-//        if(forward != this.forward) {
-//            if(forward) {
-//                executor.execute(new WriteCommand("forward", gopigoAddress));
-//            } else {
-//                executor.execute(new WriteCommand("backward", gopigoAddress));
-//            }
-//            this.forward = forward;
-//            active = true;
-//        }
+        if (Math.abs(lastAngle - angle) > 5) {
+            if (dx < 0) {
+                if (left) {
+                    sendCommand("left");
+                } else {
+                    sendCommand("right");
+                }
+                active = true;
+            }
+            lastAngle = angle;
+        }
+
+        if (lastAngle < 90) {
+            sendCommand("forward");
+        } else {
+            sendCommand("backward");
+        }
+        active = true;
     }
 
     public static void sendCommand(String command) {
         executor.execute(new WriteCommand(command));
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     private static class WriteCommand implements Runnable {
