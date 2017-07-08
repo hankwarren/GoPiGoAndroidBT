@@ -35,7 +35,7 @@ import static android.R.attr.defaultValue;
 import static java.lang.reflect.Array.getInt;
 
 
-public class MainActivity extends AppCompatActivity implements TouchPad.Listener {
+public class ControlActivity extends AppCompatActivity implements TouchPad.Listener {
     private static final String TAG = "GP";
     private static int IP_PORT = 33333;
     public static String gopigoAddress = null;
@@ -53,12 +53,10 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
     private int speed = 100;
 
     private String address;
-    private String name;
-    private BluetoothDevice bluetoothDevice = null;
+    private BluetoothDevice bluetoothDevice;
     private BluetoothSocket bluetoothSocket;
-    private BluetoothAdapter bluetoothAdapter;
 
-    private Receiver receiver;
+    private Receiver receiver = new Receiver();
 
     private static InputStream inputStream;
     private static OutputStream outputStream;
@@ -76,12 +74,13 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        Intent intent = getIntent();
+        bluetoothDevice = (BluetoothDevice)intent.getParcelableExtra("device");
+
+        Log.v(TAG, "ControlActivity.onCreate: " + bluetoothDevice.getName());
+
         touchPad = (TouchPad) findViewById(R.id.touch_pad);
         touchPad.setListener(this);
-
-        receiver = new Receiver();
-
-        name = "Waiting...";
 
         SeekBar speedBar = (SeekBar) findViewById(R.id.speedBar);
         assert speedBar != null;
@@ -104,50 +103,38 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
         });
 
         updateSpeedLabel(speed);
-        SharedPreferences preferences = getPreferences(Context.MODE_PRIVATE);
-        String saveMacAddress = getString(R.string.saved_mac_address);
-        String macAddress = preferences.getString(saveMacAddress, "notpaird");
 
-        // Look for a previously paired device...
-        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
-        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
-        if (pairedDevices.size() > 0) {
-            for (BluetoothDevice device : pairedDevices) {
-                if (device.getAddress().equals(macAddress)) {
-                    bluetoothDevice = device;
-                    name = bluetoothDevice.getName();
-                    setTitle(name);
-                    break;
-                }
-            }
+        // The onResume will continue the setup process...
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Log.v(TAG, "onPause");
+        setTitle("Pause...");
+        unregisterReceiver(receiver);
+        try {
+            bluetoothSocket.close();
+        } catch (IOException e) {
+            Log.v(TAG, "Could not close socket: " + e.getMessage());
         }
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        switch (requestCode) {
-            case REQUEST_ENABLE_BT:
-                if (resultCode == RESULT_OK) {
-                    Log.v(TAG, "Bluetooth should be enabled");
-                } else {
-                    Log.v(TAG, "enabled canceled or a problem");
-                }
-                break;
-            case REQUEST_MAC:
-                if (resultCode == RESULT_OK) {
-                    bluetoothDevice = data.getParcelableExtra("device");
-                    address = bluetoothDevice.getAddress();
-                    name = bluetoothDevice.getName();
-                    saveMacAddress(address);
+    protected void onResume() {
+        super.onResume();
+        Log.v(TAG, "onResume");
 
-                    Log.v(TAG, "use address: " + address + " name: " + name);
-                    setTitle(name);
+        Log.v(TAG, "use address: " + address + " name: " + getDeviceName());
 
-                    executor.execute(new GetBluetoothSocket());
-                }
-                break;
-        }
+        setTitle(getDeviceName());
+
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(BLUETOOTH_SOCKET);
+        intentFilter.addAction(BLUETOOTH_CONNECT);
+        registerReceiver(receiver, intentFilter);
+
+        executor.execute(new GetBluetoothSocket());
     }
 
     @Override
@@ -195,40 +182,15 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
         return false;
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        Log.v(TAG, "onPause");
-        setTitle("Pause...");
-        unregisterReceiver(receiver);
-        try {
-            bluetoothSocket.close();
-        } catch (IOException e) {
-            Log.v(TAG, "Could not close socket: " + e.getMessage());
+    private String getDeviceName() {
+        if (bluetoothDevice == null) {
+            return "Waiting...";
+        } else {
+            return bluetoothDevice.getName();
         }
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        Log.v(TAG, "onResume");
-        setTitle(name);
 
-        IntentFilter intentFilter = new IntentFilter();
-        intentFilter.addAction(BLUETOOTH_SOCKET);
-        intentFilter.addAction(BLUETOOTH_CONNECT);
-        registerReceiver(receiver, intentFilter);
-
-        executor.execute(new GetBluetoothSocket());
-    }
-
-    private void saveMacAddress(String macAddress) {
-        SharedPreferences sharedPref = getPreferences(Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = sharedPref.edit();
-        String saveMacAddress = getString(R.string.saved_mac_address);
-        editor.putString(saveMacAddress, macAddress);
-        editor.commit();
-    }
 
     private void updateSpeedLabel(int speed) {
         TextView textView = (TextView) findViewById(R.id.speedView);
@@ -331,7 +293,7 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
     }
 
     public void autoClick(View view) {
-        Button button = (Button)view;
+        Button button = (Button) view;
         if (autopilot) {
             sendCommand("stopauto");
             button.setText("Start Auto");
@@ -358,21 +320,28 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
         sendCommand("sright");
     }
 
+    // TouchPad listener ----------------------------------------------
+
+    // It would be nice to use the length of the vector to control the speed.
+    
     @Override
     public void onUp() {
         Log.v(TAG, "onUp");
-        if (this.forward) {
-            sendCommand("forward");
-        } else {
-            sendCommand("backward");
-        }
-        active = true;
+        sendCommand("stop");
+        active = false;
+//        if (this.forward) {
+//            sendCommand("forward");
+//        } else {
+//            sendCommand("backward");
+//        }
+//        active = true;
         activeView = null;
     }
 
     @Override
     public void onDown() {
         Log.v(TAG, "onDown");
+        // need to start the thing moving
     }
 
     @Override
@@ -453,7 +422,6 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
         @Override
         public void run() {
             try {
-                bluetoothAdapter.cancelDiscovery();
                 bluetoothSocket.connect();
                 Intent intent = new Intent();
                 intent.setAction(BLUETOOTH_CONNECT);
@@ -476,7 +444,7 @@ public class MainActivity extends AppCompatActivity implements TouchPad.Listener
                 Log.v(TAG, "Receive: the bluetooth socket has been set");
                 executor.execute(new ConnectSocket());
             } else if (intent.getAction().equals(BLUETOOTH_CONNECT)) {
-                setTitle(name + " connected");
+                setTitle(bluetoothDevice.getName() + " connected");
 
                 try {
                     inputStream = bluetoothSocket.getInputStream();
