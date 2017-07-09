@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -43,11 +44,9 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
     private double lastAngle = 0;
     private static final int MAX_SPEED = 250;
 
-    private int lastSpeed = 0;
-    private boolean left;
-    private int speed = 100;
+    private int lastSpeed;
+    private int lastSign;
 
-    private String address;
     private BluetoothDevice bluetoothDevice;
     private BluetoothSocket bluetoothSocket;
 
@@ -63,6 +62,7 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
     private final String BLUETOOTH_SOCKET = "com.kgdsoftware.gopigobt.SOCKET";
     private final String BLUETOOTH_CONNECT = "com.kgdsoftware.gopigobt.CONNECT";
 
+    private String direction = "left";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,7 +83,7 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
             @Override
             public void onProgressChanged(SeekBar speedkBar, int progress, boolean fromUser) {
                 updateSpeedLabel(progress);
-                speed = progress;
+                lastSpeed = progress;
             }
 
             @Override
@@ -93,13 +93,11 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 // It was too noisy to send the command in onProgressChanged.
-                sendCommand("speed " + speed);
+                sendCommand("speed " + lastSpeed);
             }
         });
 
-        updateSpeedLabel(speed);
-
-        // The onResume will continue the setup process...
+        updateSpeedLabel(lastSpeed);
     }
 
     @Override
@@ -113,14 +111,13 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
         } catch (IOException e) {
             Log.v(TAG, "Could not close socket: " + e.getMessage());
         }
+        saveLastSpeed(lastSpeed);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         Log.v(TAG, "onResume");
-
-        Log.v(TAG, "use address: " + address + " name: " + getDeviceName());
 
         setTitle(getDeviceName());
 
@@ -130,6 +127,9 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
         registerReceiver(receiver, intentFilter);
 
         executor.execute(new GetBluetoothSocket());
+
+        lastSpeed = getLastSpeed();
+        updateSpeedLabel(lastSpeed);
     }
 
     @Override
@@ -155,13 +155,11 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
                 return true;
 
             case R.id.auto_pilot_item:
-                //Intent autoPilotIntent = new Intent(this, AutoPilotActivity.class);
-                //startActivity(autoPilotIntent);
-                if (autopilot) {
-                    sendCommand("stopauto");
-                } else {
-                    sendCommand("startauto");
-                }
+//                if (autopilot) {
+//                    sendCommand("stopauto");
+//                } else {
+//                    sendCommand("startauto");
+//                }
                 autopilot = !autopilot;
                 return true;
 
@@ -175,6 +173,18 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
                 return true;
         }
         return false;
+    }
+
+    private int getLastSpeed() {
+        SharedPreferences sharedPref = getPreferences(Context.MODE_PRIVATE);
+        return sharedPref.getInt("lastSpeed", 128);
+    }
+
+    private void saveLastSpeed(int lastSpeed) {
+        SharedPreferences sharedPref = getPreferences(Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = sharedPref.edit();
+        editor.putInt("lastSpeed", lastSpeed);
+        editor.commit();
     }
 
     private String getDeviceName() {
@@ -196,19 +206,19 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
     }
 
     public void increaseClick(View view) {
-        speed += 10;
-        if (speed > 255)
-            speed = 255;
+        lastSpeed += 10;
+        if (lastSpeed > 255)
+            lastSpeed = 255;
         sendCommand("incspeed");
-        updateSpeedLabel(speed);
+        updateSpeedLabel(lastSpeed);
     }
 
     public void decreaseClick(View view) {
-        speed -= 10;
-        if (speed < 35)
-            speed = 35;
+        lastSpeed -= 10;
+        if (lastSpeed < 35)
+            lastSpeed = 35;
         sendCommand("decspeed");
-        updateSpeedLabel(speed);
+        updateSpeedLabel(lastSpeed);
     }
 
     public void forwardClick(View view) {
@@ -335,8 +345,6 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
 
     @Override
     public void onMove(double angle, double dx, double dy, double length) {
-        boolean left = (dx < 0);
-
         Log.v(TAG, "onMove " + decimalFormat.format(angle) + " degrees"
                 + " --> " + decimalFormat.format(length));
         if (length > 1.0) length = 1.0;
@@ -347,30 +355,35 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
             sendCommand("speed " + speed);
             updateSpeedLabel((int)speed);
         }
-        if (Math.abs(lastAngle - angle) > 5) {
-            if (dx < 0) {
-                if (left) {
-                    sendCommand("left");
-                } else {
-                    sendCommand("right");
-                }
-                active = true;
-            }
+
+        if (dx < 0) angle = -angle;
+
+        double dAngle = lastAngle - angle;
+        int sign = (int)Math.signum((int)dAngle);
+
+        if (sign != lastSign) {
+            direction = (dAngle < 0) ? "right" : "left";
+        }
+        lastSign = sign;
+
+        if (Math.abs(dAngle) > 5) {
+            sendCommand(direction);
+            active = true;
             lastAngle = angle;
         }
-
-        if (lastAngle < 90) {
-            sendCommand("forward");
-        } else {
-            sendCommand("backward");
-        }
+        sendCommand("forward");
+//        if (lastAngle < 90) {
+//            sendCommand("forward");
+//        } else {
+//            sendCommand("backward");
+//        }
         active = true;
     }
 
     public static void sendCommand(String command) {
         executor.execute(new WriteCommand(command));
         try {
-            Thread.sleep(100);
+            Thread.sleep(100);      // give the Pi a change to work
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -457,5 +470,9 @@ public class ControlActivity extends AppCompatActivity implements TouchPad.Liste
                 }
             }
         }
+    }
+
+    private enum Direction {
+        LEFT, RIGHT
     }
 }
